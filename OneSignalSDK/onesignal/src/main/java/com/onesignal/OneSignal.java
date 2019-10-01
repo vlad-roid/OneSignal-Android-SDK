@@ -1303,9 +1303,7 @@ public class OneSignal {
 
       deviceInfo.put("net_type", osUtils.getNetType());
       deviceInfo.put("carrier", osUtils.getCarrierName());
-      try {
-         deviceInfo.put("rooted", RootToolsInternalMethods.isRooted());
-      } catch (Throwable t) {}
+      deviceInfo.put("rooted", RootToolsInternalMethods.isRooted());
 
       OneSignalStateSynchronizer.updateDeviceInfo(deviceInfo);
 
