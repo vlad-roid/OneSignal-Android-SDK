@@ -1,12 +1,20 @@
 package com.test.onesignal;
 
+import android.app.job.JobInfo;
+import android.app.job.JobScheduler;
+import android.app.job.JobService;
+import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.os.Looper;
+import android.support.annotation.Nullable;
+import android.os.SystemClock;
 
 import com.onesignal.OneSignalDbHelper;
 import com.onesignal.OneSignalPackagePrivateHelper;
+import com.onesignal.OneSignalPackagePrivateHelper.OSSessionManager;
 import com.onesignal.OneSignalPackagePrivateHelper.OneSignalPrefs;
+import com.onesignal.OutcomeEvent;
 import com.onesignal.ShadowCustomTabsClient;
 import com.onesignal.ShadowDynamicTimer;
 import com.onesignal.ShadowFirebaseAnalytics;
@@ -19,11 +27,14 @@ import com.onesignal.ShadowOSWebView;
 import com.onesignal.ShadowOneSignalDbHelper;
 import com.onesignal.ShadowOneSignalRestClient;
 import com.onesignal.ShadowOneSignalRestClientWithMockConnection;
+import com.onesignal.OneSignalShadowPackageManager;
 import com.onesignal.ShadowPushRegistratorGCM;
 import com.onesignal.StaticResetHelper;
 
 import junit.framework.Assert;
 
+import org.json.JSONArray;
+import org.json.JSONException;
 import org.robolectric.Robolectric;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.shadows.ShadowApplication;
@@ -32,6 +43,7 @@ import org.robolectric.util.Scheduler;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Set;
 
 import static org.robolectric.Shadows.shadowOf;
@@ -44,6 +56,8 @@ public class TestHelpers {
       OneSignalPackagePrivateHelper.OneSignalPrefs.initializePool();
       if (!ranBeforeTestSuite)
          return;
+
+      resetSystemClock();
 
       stopAllOSThreads();
 
@@ -73,6 +87,8 @@ public class TestHelpers {
       ShadowDynamicTimer.resetStatics();
 
       ShadowOSWebView.resetStatics();
+
+      OneSignalShadowPackageManager.resetStatics();
 
       lastException = null;
    }
@@ -199,12 +215,12 @@ public class TestHelpers {
       flushBufferedSharedPrefs();
       StaticResetHelper.restSetStaticFields();
    }
-   private static int sessionCountOffset = 1;
+
    static void restartAppAndElapseTimeToNextSession() throws Exception {
       stopAllOSThreads();
       flushBufferedSharedPrefs();
       StaticResetHelper.restSetStaticFields();
-      ShadowSystemClock.setCurrentTimeMillis(System.currentTimeMillis() + 1_000 * 31 * sessionCountOffset++);
+      advanceSystemTimeBy(31);
    }
 
    static ArrayList<HashMap<String, Object>> getAllNotificationRecords() {
@@ -242,12 +258,91 @@ public class TestHelpers {
       return mapList;
    }
 
-   static void advanceTimeByMs(long advanceBy) {
-      ShadowSystemClock.setCurrentTimeMillis(System.currentTimeMillis() +  advanceBy);
+   static List<OutcomeEvent>  getAllOutcomesRecords() {
+      SQLiteDatabase readableDatabase = OneSignalDbHelper.getInstance(RuntimeEnvironment.application).getReadableDatabase();
+      Cursor cursor = readableDatabase.query(
+              OneSignalPackagePrivateHelper.OutcomeEventsTable.TABLE_NAME,
+              null,
+              null,
+              null,
+              null, // group by
+              null, // filter by row groups
+              null, // sort order, new to old
+              null // limit
+      );
+
+      List<OutcomeEvent> events = new ArrayList<>();
+      if (cursor.moveToFirst()) {
+         do {
+            String notificationIds = cursor.getString(cursor.getColumnIndex(OneSignalPackagePrivateHelper.OutcomeEventsTable.COLUMN_NAME_NOTIFICATION_IDS));
+            String name = cursor.getString(cursor.getColumnIndex(OneSignalPackagePrivateHelper.OutcomeEventsTable.COLUMN_NAME));
+            String sessionString = cursor.getString(cursor.getColumnIndex(OneSignalPackagePrivateHelper.OutcomeEventsTable.COLUMN_NAME_SESSION));
+            OSSessionManager.Session session = OSSessionManager.Session.fromString(sessionString);
+            Long timestamp = cursor.getLong(cursor.getColumnIndex(OneSignalPackagePrivateHelper.OutcomeEventsTable.COLUMN_NAME_TIMESTAMP));
+
+            int paramsIndex = cursor.getColumnIndex(OneSignalPackagePrivateHelper.OutcomeEventsTable.COLUMN_NAME_PARAMS);
+            String paramsString = cursor.isNull(paramsIndex) ? null : cursor.getString(paramsIndex);
+            OneSignalPackagePrivateHelper.OutcomeParams params =
+                    paramsString != null ? OneSignalPackagePrivateHelper.OutcomeParams.Builder
+                            .newInstance()
+                            .setJsonString(paramsString)
+                            .build() : null;
+
+            try {
+               OutcomeEvent event = new OutcomeEvent(session, new JSONArray(notificationIds), name, timestamp, params);
+               events.add(event);
+            } catch (JSONException e) {
+               e.printStackTrace();
+            }
+         } while (cursor.moveToNext());
+      }
+
+      cursor.close();
+      readableDatabase.close();
+
+      return events;
+   }
+
+   /**
+    * Calling setNanoTime ends up locking time to zero.
+    * NOTE: This setNanoTime is going away in future robolectric versions
+    */
+   static void lockTimeTo(long sec) {
+      long nano = sec * 1_000L * 1_000L;
+      ShadowSystemClock.setNanoTime(nano);
+   }
+
+   static void resetSystemClock() {
+      SystemClock.setCurrentTimeMillis(System.currentTimeMillis());
+   }
+
+   static void advanceSystemTimeBy(long sec) {
+      long ms = sec * 1_000L;
+      SystemClock.setCurrentTimeMillis(ShadowSystemClock.currentTimeMillis() + ms);
    }
 
    public static void assertMainThread() {
       if (!Looper.getMainLooper().getThread().equals(Thread.currentThread()))
          Assert.fail("assertMainThread - Not running on main thread when expected to!");
+   }
+
+
+   public static @Nullable JobInfo getNextJob() {
+      JobScheduler jobScheduler =
+         (JobScheduler)RuntimeEnvironment.application.getSystemService(Context.JOB_SCHEDULER_SERVICE);
+      List<JobInfo> jobs = jobScheduler.getAllPendingJobs();
+      if (jobs.size() == 0)
+         return null;
+      return jobs.get(0);
+   }
+
+   public static void runNextJob() {
+      try {
+         Class jobClass = Class.forName(getNextJob().getService().getClassName());
+         JobService jobService = (JobService)Robolectric.buildService(jobClass).create().get();
+         jobService.onStartJob(null);
+      } catch (ClassNotFoundException e) {
+         e.printStackTrace();
+      }
    }
 }
