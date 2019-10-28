@@ -94,7 +94,6 @@ import org.robolectric.android.controller.ServiceController;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowAlertDialog;
 import org.robolectric.shadows.ShadowLog;
-import org.robolectric.shadows.ShadowSystemClock;
 
 import java.lang.reflect.Field;
 import java.math.BigInteger;
@@ -107,11 +106,12 @@ import static com.onesignal.OneSignalPackagePrivateHelper.NotificationBundleProc
 import static com.onesignal.OneSignalPackagePrivateHelper.NotificationOpenedProcessor_processFromContext;
 import static com.onesignal.OneSignalPackagePrivateHelper.NotificationSummaryManager_updateSummaryNotificationAfterChildRemoved;
 import static com.onesignal.OneSignalPackagePrivateHelper.createInternalPayloadBundle;
+import static com.onesignal.ShadowRoboNotificationManager.getNotificationsInGroup;
 import static com.test.onesignal.RestClientAsserts.assertReportReceivedAtIndex;
 import static com.test.onesignal.RestClientAsserts.assertRestCalls;
 import static com.test.onesignal.TestHelpers.advanceSystemTimeBy;
+import static com.test.onesignal.TestHelpers.fastColdRestartApp;
 import static com.test.onesignal.TestHelpers.threadAndTaskWait;
-
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.Assert.assertFalse;
 import static junit.framework.Assert.assertNotNull;
@@ -327,51 +327,26 @@ public class GenerateNotificationRunner {
 
    @Test
    @Config(sdk = Build.VERSION_CODES.N)
-   public void testGetMostRecentNotifIdFromGroup() throws Exception {
-      OneSignal.setInFocusDisplaying(OneSignal.OSInFocusDisplayOption.Notification);
-      OneSignal.init(blankActivity, "123456789", "b2f7f966-d8cc-11e4-bed1-df8f05be55ba");
+   public void testFourNotificationsUseProvidedGroup() throws Exception {
+      OneSignal.init(blankActivity.getApplicationContext(), "123456789", "b2f7f966-d8cc-11e4-bed1-df8f05be55ba");
       threadAndTaskWait();
 
       // Add 4 grouped notifications
       postNotificationWithOptionalGroup(4, "test1");
 
-      SQLiteDatabase readableDb = OneSignalDbHelper.getInstance(blankActivity).getReadableDatabase();
-      // Grab the most recent timestamped notification from local DB
-      Integer mostRecentId = OneSignalNotificationManagerPackageHelper.getMostRecentNotifIdFromGroup(readableDb, "test1", false);
-
-      Map<Integer, PostedNotification> postedNotifs = ShadowRoboNotificationManager.notifications;
-      // Iterator is ordered by notification post (0 index is most recent)
-      Iterator<Map.Entry<Integer, PostedNotification>> postedNotifsIterator = postedNotifs.entrySet().iterator();
-      // First notification is the summary so we skip it and move on to the first normal notif
-      postedNotifsIterator.next();
-      Integer expectedId = postedNotifsIterator.next().getKey();
-
-      // Assert our id equals the first real notif id (most recent posted)
-      assertEquals(expectedId, mostRecentId);
+      assertEquals(4, getNotificationsInGroup("test1").size());
    }
 
    @Test
    @Config(sdk = Build.VERSION_CODES.N)
-   public void testGetMostRecentNotifIdFromGroupless() throws Exception {
-      OneSignal.setInFocusDisplaying(OneSignal.OSInFocusDisplayOption.Notification);
-      OneSignal.init(blankActivity, "123456789", "b2f7f966-d8cc-11e4-bed1-df8f05be55ba");
+   public void testFourGrouplessNotificationsUseDefaultGroup() throws Exception {
+      OneSignal.init(blankActivity.getApplicationContext(), "123456789", "b2f7f966-d8cc-11e4-bed1-df8f05be55ba");
       threadAndTaskWait();
 
       // Add 4 groupless notifications
       postNotificationWithOptionalGroup(4, null);
 
-      SQLiteDatabase readableDb = OneSignalDbHelper.getInstance(blankActivity).getReadableDatabase();
-      // Grab the most recent timestamped notification from local DB
-      Integer mostRecentId = OneSignalNotificationManagerPackageHelper.getMostRecentNotifIdFromGroup(readableDb, null, true);
-
-      Map<Integer, PostedNotification> postedNotifs = ShadowRoboNotificationManager.notifications;
-      // Iterator is ordered by notification post (0 index is most recent)
-      Iterator<Map.Entry<Integer, PostedNotification>> postedNotifsIterator = postedNotifs.entrySet().iterator();
-      // Grab first active notification since groupless won't have a summary
-      Integer expectedId = postedNotifsIterator.next().getKey();
-
-      // Assert our id equals the first real notif id (most recent posted)
-      assertEquals(expectedId, mostRecentId);
+      assertEquals(4, getNotificationsInGroup("os_group_undefined").size());
    }
 
     @Test
@@ -526,13 +501,11 @@ public class GenerateNotificationRunner {
       assertEquals(0, groupCount);
    }
 
-    public Bundle postNotificationWithOptionalGroup(int notifCount, String group) {
+    private @Nullable Bundle postNotificationWithOptionalGroup(int notifCount, @Nullable String group) {
        Bundle bundle = null;
        for (int i = 0; i < notifCount; i++) {
           bundle = getBaseNotifBundle("UUID" + i);
-
-          if (group != null)
-             bundle.putString("grp", group);
+          bundle.putString("grp", group);
 
           NotificationBundleProcessor_ProcessFromGCMIntentService(blankActivity, bundle, null);
        }
@@ -765,7 +738,7 @@ public class GenerateNotificationRunner {
    
 
    @Test
-   public void shouldHandleBasicNotifications() {
+   public void shouldHandleBasicNotifications() throws Exception {
       // Make sure the notification got posted and the content is correct.
       Bundle bundle = getBaseNotifBundle();
       NotificationBundleProcessor_ProcessFromGCMIntentService(blankActivity, bundle, null);
@@ -805,6 +778,10 @@ public class GenerateNotificationRunner {
       // Go forward 4 weeks
       // Note: Does not effect the SQL function strftime
       advanceSystemTimeBy(2_419_202);
+
+      // Restart the app so OneSignalCacheCleaner can clean out old notifications
+      fastColdRestartApp();
+      threadAndTaskWait();
 
       // Display a 3rd notification
       // Should of been added for a total of 2 records now.

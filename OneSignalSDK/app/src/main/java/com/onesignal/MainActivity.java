@@ -34,6 +34,7 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.support.annotation.Nullable;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -330,13 +331,9 @@ public class MainActivity extends Activity implements OSEmailSubscriptionObserve
    public void onSendOutcomeClicked(View view) {
       OneSignal.sendOutcome(outcomeName.getText().toString(), new OneSignal.OutcomeCallback() {
          @Override
-         public void onOutcomeSuccess(String name) {
-            updateTextView(name + " Outcome sent successfully");
-         }
-
-         @Override
-         public void onOutcomeFail(int statusCode, String response) {
-            updateTextView("Outcome fail with status code: " + statusCode);
+         public void onSuccess(@Nullable OutcomeEvent outcomeEvent) {
+            if (outcomeEvent != null)
+               updateTextView(outcomeEvent.toString());
          }
       });
    }
@@ -344,13 +341,9 @@ public class MainActivity extends Activity implements OSEmailSubscriptionObserve
    public void onSendUniqueOutcomeClicked(View view) {
       OneSignal.sendUniqueOutcome(outcomeUnique.getText().toString(), new OneSignal.OutcomeCallback() {
          @Override
-         public void onOutcomeSuccess(String name) {
-            updateTextView(name + " Unique Outcome sent successfully");
-         }
-
-         @Override
-         public void onOutcomeFail(int statusCode, String response) {
-            updateTextView("Unique Outcome fail with status code: " + statusCode);
+         public void onSuccess(@Nullable OutcomeEvent outcomeEvent) {
+            if (outcomeEvent != null)
+               updateTextView(outcomeEvent.toString());
          }
       });
    }
@@ -361,13 +354,9 @@ public class MainActivity extends Activity implements OSEmailSubscriptionObserve
 
       OneSignal.sendOutcomeWithValue(outcomeValueName.getText().toString(), Float.parseFloat(outcomeValue.getText().toString()), new OneSignal.OutcomeCallback() {
          @Override
-         public void onOutcomeSuccess(String name) {
-            updateTextView(name + " Outcome sent with value successfully");
-         }
-
-         @Override
-         public void onOutcomeFail(int statusCode, String response) {
-            updateTextView("Outcome with value fail with status code: " + statusCode);
+         public void onSuccess(@Nullable OutcomeEvent outcomeEvent) {
+            if (outcomeEvent != null)
+               updateTextView(outcomeEvent.toString());
          }
       });
    }
