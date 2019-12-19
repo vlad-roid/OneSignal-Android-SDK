@@ -416,7 +416,7 @@ public class OneSignal {
    private static TrackAmazonPurchase trackAmazonPurchase;
    private static TrackFirebaseAnalytics trackFirebaseAnalytics;
 
-   public static final String VERSION = "031203";
+   public static final String VERSION = "031204";
 
    private static OSSessionManager.SessionListener getNewSessionListener() {
       return new OSSessionManager.SessionListener() {
@@ -2081,14 +2081,14 @@ public class OneSignal {
       if (!defaultOpenActionDisabled)
          urlOpened = openURLFromNotification(inContext, data);
 
-      runNotificationOpenedCallback(data, true, fromAlert);
-
       // Check if the notification click should lead to a DIRECT session
       if (shouldInitDirectSessionFromNotificationOpen(inContext, fromAlert, urlOpened, defaultOpenActionDisabled)) {
          // We want to set the app entry state to NOTIFICATION_CLICK when coming from background
          appEntryState = AppEntryAction.NOTIFICATION_CLICK;
          sessionManager.onDirectSessionFromNotificationOpen(notificationId);
       }
+
+      runNotificationOpenedCallback(data, true, fromAlert);
    }
 
    static boolean startOrResumeApp(Context inContext) {
